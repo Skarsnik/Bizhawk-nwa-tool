@@ -58,6 +58,7 @@ namespace Nyo.Fr.EmuNWA
         CORE_CURRENT_INFO,
         CORES_LIST,
         CORE_INFO,
+        GAME_INFO,
         MY_NAME_IS,
         CORE_MEMORIES,
         CORE_READ,
@@ -207,7 +208,7 @@ namespace Nyo.Fr.EmuNWA
 
     public class NWAServer
     {
-        NWAClient[] clients;
+        List<NWAClient> clients;
         List<NWAClient> clientsMemoryAccess;
         Socket serverSocket;
         private BizHawk.Client.Common.Config _config;
@@ -232,7 +233,7 @@ namespace Nyo.Fr.EmuNWA
         }
         public void start()
         {
-            clients = new NWAClient[5];
+            clients = new List<NWAClient>();
             //IPHostEntry ipHostInfo = Dns.GetHostEntry("localhost");
             //localEP = new IPEndPoint(ipHostInfo.AddressList[0], 65400);
             localEP = new IPEndPoint(IPAddress.IPv6Any, 65400);
@@ -287,20 +288,14 @@ namespace Nyo.Fr.EmuNWA
 
         private void removeClient(NWAClient client)
         {
-            for (uint i = 0; i < clients.Length; i++)
-            {
-                if (clients[i] == client)
-                {
-                    clients[i] = null;
-                    clientDisconnectedCallBack?.Invoke(client.name);
-                }
-            }
+            clients.Remove(client);
+            Console.WriteLine("Removing : {0}", client.name);
+            clientDisconnectedCallBack?.Invoke(client.name);
             if (clientsMemoryAccess.Contains(client))
             {
                 clientsMemoryAccess.Remove(client);
             }
             numberOfClient--;
-
         }
         private void closeAndRemove(NWAClient client)
         {
@@ -317,11 +312,7 @@ namespace Nyo.Fr.EmuNWA
                 NWAClient newClient = new NWAClient(this);
                 newClient.socket = handler;
                 numberOfClient++;
-                for (int i = 0; i < clients.Length; i++)
-                {
-                    if (clients[i] == null)
-                        clients[i] = newClient;
-                }
+                clients.Add(newClient);
                 newClientConnectedCallBack?.Invoke(newClient.name);
                 handler.BeginReceive(newClient.buffer, 0, NWAClient.BufferSize, SocketFlags.None,
                 new AsyncCallback(this.ReadCallback), newClient);
@@ -365,7 +356,7 @@ namespace Nyo.Fr.EmuNWA
             int pos = 0;
             while (pos < client.readed)
             {
-                Console.WriteLine("Client in state {0}", client.state);
+                Console.WriteLine("Client in state {0} - {1}", client.state, BitConverter.ToString(client.buffer));
                 if (client.state == NWAClient.State.ExpectingBinaryData)
                 {
                     client.state = NWAClient.State.GettingBinaryData;
@@ -431,6 +422,7 @@ namespace Nyo.Fr.EmuNWA
                     if (Char.IsLetter(Convert.ToChar(client.buffer[pos])) || client.buffer[pos] == '!')
                     {
                         client.state = NWAClient.State.GettingCommand;
+                        Console.WriteLine("Pos : {0}, At Pos {1}", pos, client.buffer[pos]);
                     }
                     else
                     {
@@ -442,15 +434,20 @@ namespace Nyo.Fr.EmuNWA
                 }
                 if (client.state == NWAClient.State.GettingCommand)
                 {
-                    if (client.buffer.Contains(Convert.ToByte('\n')))
+                    byte[] copyBuff = new byte[client.buffer.Length - pos];
+                    Buffer.BlockCopy(client.buffer, pos, copyBuff, 0, client.buffer.Length - pos);
+                    //Console.WriteLine("Copy buff {0}", BitConverter.ToString(copyBuff));
+                    if (copyBuff.Contains(Convert.ToByte('\n')))
                     {
                         int startingPos = pos;
                         for (; client.buffer[pos] != '\n'; pos++)
                         {
+                            client.bufferCommand[client.bufferCommandPos] = client.buffer[pos];
                             client.bufferCommandPos++;
-                            client.bufferCommand[client.bufferCommandPos + pos - startingPos] = client.buffer[pos];
                         }
+                        //Console.WriteLine("BufferCommand pos : {0}", client.bufferCommandPos);
                         executeCommand(client);
+                        client.bufferCommandPos = 0;
                         pos++;
                     }
                     else
@@ -458,7 +455,7 @@ namespace Nyo.Fr.EmuNWA
                         int startingPos = pos;
                         for (; pos < client.readed; pos++)
                         {
-                            client.bufferCommand[client.bufferCommandPos + pos - startingPos] = client.buffer[pos];
+                            client.bufferCommand[client.bufferCommandPos] = client.buffer[pos];
                             client.bufferCommandPos++;
                         }
                     }
@@ -469,8 +466,9 @@ namespace Nyo.Fr.EmuNWA
         }
         private void executeCommand(NWAClient client)
         {
+            // Needed since BufferCommand is a fixed lenght buffer
             byte[] copy = new byte[client.bufferCommandPos];
-            Array.Copy(client.buffer, copy, client.bufferCommandPos);
+            Array.Copy(client.bufferCommand, copy, client.bufferCommandPos);
             string commandString = Encoding.UTF8.GetString(copy);
             Console.WriteLine("Trying to process : {0}$", commandString);
             string command;

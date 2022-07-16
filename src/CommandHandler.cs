@@ -9,6 +9,7 @@ namespace Nyo.Fr.EmuNWA
     class CommandHandler
     {
         static public BizHawk.Client.Common.ApiContainer APIs = null;
+        static public BizHawk.Emulation.Common.IEmulator emulator = null;
         static public bool romloadedOnce = false;
         static public Dictionary<NWACommand, Func<NWAClient, String[], bool>> commandsMap = new Dictionary<NWACommand, Func<NWAClient, String[], bool>>
         {
@@ -20,7 +21,8 @@ namespace Nyo.Fr.EmuNWA
             { NWACommand.CORE_CURRENT_INFO, CommandHandler.currentCoreInfo},
             { NWACommand.CORE_MEMORIES, CommandHandler.coreMemories },
             { NWACommand.CORE_READ, CommandHandler.coreRead },
-            { NWACommand.bCORE_WRITE, CommandHandler.coreWrite }
+            { NWACommand.bCORE_WRITE, CommandHandler.coreWrite },
+            { NWACommand.GAME_INFO, CommandHandler.gameInfo }
         };
         static public Dictionary<NWACommand, Func<NWAClient, bool>> binaryCommandHandlerMap = new Dictionary<NWACommand, Func<NWAClient, bool>>()
         {
@@ -32,7 +34,7 @@ namespace Nyo.Fr.EmuNWA
         {
             Dictionary<String, String> reply = new Dictionary<string, string>();
             reply["name"] = "BizHawk";
-            reply["version"] = BizHawk.Common.VersionInfo.GetEmuVersion();
+            reply["version"] = BizHawk.Common.VersionInfo.GetEmuVersion().Replace("Version ", "");
             reply["id"] = "Happy Skarsnik";
             reply["nwa_version"] = "1.0";
             foreach (var plop in commandsMap)
@@ -67,6 +69,20 @@ namespace Nyo.Fr.EmuNWA
                     reply["game"] = APIs.GameInfo.GetGameInfo().Name;
                 }
             }
+            client.sendHashReply(reply);
+            return true;
+        }
+        static bool gameInfo(NWAClient client, String[] args)
+        {
+            if (APIs == null)
+            {
+                client.sendError(ErrorKind.command_error, "No game loaded");
+                return true;
+            }
+            Dictionary<String, String> reply = new Dictionary<string, string>();
+            reply["name"] = APIs.GameInfo.GetGameInfo().Name;
+            reply["region"] = APIs.GameInfo.GetGameInfo().Region;
+            reply["hash"] = APIs.GameInfo.GetGameInfo().GetHashCode().ToString();
             client.sendHashReply(reply);
             return true;
         }
@@ -134,14 +150,15 @@ namespace Nyo.Fr.EmuNWA
         }
         static bool currentCoreInfo(NWAClient client, String[] args)
         {
-            String current = APIs.Emulation.GetSystemId();
-            if (current == null)
+            var gameInfo = APIs.GameInfo.GetGameInfo();
+            if (APIs == null || APIs.GameInfo.GetGameInfo().System == VSystemID.Raw.NULL)
             {
                 client.sendError(ErrorKind.command_error, "No core loaded");
                 return true;
             }
+            String currentCore = emulator.Attributes().CoreName;
             String[] p = new string[1];
-            p[0] = current;
+            p[0] = currentCore;
             return coreInfo(client, p);
         }
 
@@ -153,12 +170,16 @@ namespace Nyo.Fr.EmuNWA
                 return true;
             }
             List<Dictionary<String, String>> reply = new List<Dictionary<String, String>>();
-            foreach (var domainName in APIs.Memory.GetMemoryDomainList())
+            var domainsList = ((BizHawk.Client.Common.MemoryApi)(APIs.Memory)).DomainList;
+            foreach (var domain in domainsList)
             {
                 Dictionary<String, String> domainRep = new Dictionary<String, String>();
-                domainRep["name"] = Common.domainToNWAName(domainName, APIs.GameInfo.GetGameInfo().System);
-                domainRep["access"] = "rw";
-                domainRep["size"] = APIs.Memory.GetMemoryDomainSize(domainName).ToString();
+                domainRep["name"] = Common.domainToNWAName(domain.Name, APIs.GameInfo.GetGameInfo().System);
+                if (domain.Writable == true)
+                    domainRep["access"] = "rw";
+                else
+                    domainRep["access"] = "r";
+                domainRep["size"] = domain.Size.ToString();
                 reply.Add(domainRep);
             }
             client.sendHashReply(reply);
@@ -228,6 +249,7 @@ namespace Nyo.Fr.EmuNWA
         static bool coreRead(NWAClient client, String[] args)
         {
             coreReadWrite(client, args, false);
+            client.writeAccess = false;
             return true;
         }
 
@@ -235,6 +257,7 @@ namespace Nyo.Fr.EmuNWA
         {
             client.expectedBinaryDataSize = coreReadWrite(client, args, true);
             client.readyToWrite = false;
+            client.writeAccess = true;
             return true;
         }
 
@@ -254,7 +277,7 @@ namespace Nyo.Fr.EmuNWA
                 Console.WriteLine("Readed : " + readed.Count);
                 bytes.AddRange(readed);
             }
-            Console.WriteLine("Passing : " + bytes.Count);
+            Console.WriteLine("Passing : {0}", bytes.Count);
             client.sendData(bytes);
             client.memoryAccess.Clear();
         }
@@ -264,7 +287,7 @@ namespace Nyo.Fr.EmuNWA
             // We need to fix the size of the write
             Console.WriteLine("Write Memory");
             Console.WriteLine("Client is null ? :" + client == null);
-            Console.WriteLine(client.binaryBuffer.ToString());
+            Console.WriteLine(BitConverter.ToString(client.binaryBuffer));
             if (client.expectedBinaryDataSize == 0)
             {
                 client.memoryAccess[0].size = (uint)client.binaryBuffer.Length;

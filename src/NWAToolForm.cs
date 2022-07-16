@@ -1,8 +1,10 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Windows.Forms;
 
 using BizHawk.Client.Common;
 using BizHawk.Client.EmuHawk;
+using BizHawk.Emulation.Common;
 
 namespace Nyo.Fr.EmuNWA
 {
@@ -10,6 +12,8 @@ namespace Nyo.Fr.EmuNWA
     [ExternalTool("NWATool")]
     public sealed partial class NWAToolForm : ToolFormBase, IExternalToolForm
     {
+        [RequiredService]
+        public IEmulator? Emulator { get; set; }
         public ApiContainer? _maybeAPIContainer { get; set; }
 
         private ApiContainer APIs => _maybeAPIContainer!;
@@ -75,11 +79,13 @@ namespace Nyo.Fr.EmuNWA
         {
             if (ClientsListView.InvokeRequired)
             {
+                Console.WriteLine("Disconnected delated for {0}", name);
                 System.Action safeWrite = delegate { clientDisconnected(name); };
                 ClientsListView.Invoke(safeWrite);
             }
             else
             {
+                Console.WriteLine("Removed client in list", name);
                 ClientsListView.Items.RemoveByKey(name);
                 addMessage("NWA Client " + name + " disconnected");
             }
@@ -88,6 +94,7 @@ namespace Nyo.Fr.EmuNWA
         public override void Restart()
         {
             CommandHandler.APIs = APIs;
+            CommandHandler.emulator = Emulator;
             if (messages.Count != 0)
             {
                 foreach (var message in messages)
