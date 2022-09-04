@@ -22,8 +22,12 @@ namespace Nyo.Fr.EmuNWA
             { NWACommand.CORE_MEMORIES, CommandHandler.coreMemories },
             { NWACommand.CORE_READ, CommandHandler.coreRead },
             { NWACommand.bCORE_WRITE, CommandHandler.coreWrite },
-            { NWACommand.GAME_INFO, CommandHandler.gameInfo }
+            { NWACommand.GAME_INFO, CommandHandler.gameInfo },
+            { NWACommand.LOAD_STATE, CommandHandler.loadState },
+            { NWACommand.SAVE_STATE, CommandHandler.saveState }
         };
+
+       
         static public Dictionary<NWACommand, Func<NWAClient, bool>> binaryCommandHandlerMap = new Dictionary<NWACommand, Func<NWAClient, bool>>()
         {
             { NWACommand.bCORE_WRITE, CommandHandler.coreWriteHandler }
@@ -159,7 +163,12 @@ namespace Nyo.Fr.EmuNWA
             String currentCore = emulator.Attributes().CoreName;
             String[] p = new string[1];
             p[0] = currentCore;
-            return coreInfo(client, p);
+            Dictionary<String, String> reply = new Dictionary<String, String>();
+            reply["name"] = emulator.Attributes().CoreName;
+            reply["platform"] = emulator.SystemId;
+            reply["author"] = emulator.Attributes().Author;
+            client.sendHashReply(reply);
+            return true;
         }
 
         static bool coreMemories(NWAClient client, String[] args)
@@ -196,6 +205,7 @@ namespace Nyo.Fr.EmuNWA
                 client.sendError(ErrorKind.invalid_argument, "You need to at least specify a domain to read for CORE_READ or CORE_WRITE");
                 return -1;
             }
+            var domainsList = ((BizHawk.Client.Common.MemoryApi)(APIs.Memory)).DomainList;
             if (args.Length >= 1)
             {
 
@@ -228,6 +238,11 @@ namespace Nyo.Fr.EmuNWA
                         if (i % 2 == 0)
                         {
                             size = (uint)Common.NWANumber(args[i]);
+                            if (offset > domainsList[domain].Size)
+                            {
+                                client.sendError(ErrorKind.invalid_argument, "Offset is out of bound for the domain");
+                                return -1;
+                            }
                             client.addMemoryAccess(domain, (uint)offset, size, write);
                             totalSize += size;
                             offset = -1;
@@ -261,6 +276,53 @@ namespace Nyo.Fr.EmuNWA
             return true;
         }
 
+        static bool loadState(NWAClient client, string[] args)
+        {
+            if (args.Length != 1)
+            {
+                client.sendError(ErrorKind.invalid_argument, "LOAD_STATE take a filename");
+                return true;
+            }
+            if (!emulator.HasSavestates())
+            {
+                client.sendError(ErrorKind.command_error, "The core does not suport savestates");
+                return true;
+            }
+            client.savestateSave = false;
+            client.savestateToDo = true;
+            client.savestateFile = args[0];
+            return true;
+        }
+
+        static bool saveState(NWAClient client, string[] args)
+        {
+            if (args.Length != 1)
+            {
+                client.sendError(ErrorKind.invalid_argument, "SAVE_STATE take a filename");
+                return true;
+            }
+            if (!emulator.HasSavestates())
+            {
+                client.sendError(ErrorKind.command_error, "The core does not suport savestates");
+                return true;
+            }
+            client.savestateSave = true;
+            client.savestateToDo = true;
+            client.savestateFile = args[0];
+            return true;
+
+        }
+
+        static public void doActualStateOperation(NWAClient client)
+        {
+            Console.WriteLine("Doing savestate {0}, {1}", client.savestateSave, client.savestateFile);
+            client.savestateToDo = false;
+            if (client.savestateSave)
+                APIs.SaveState.Save(client.savestateFile);
+            else
+                APIs.SaveState.Load(client.savestateFile);
+            client.sendOk();
+        }
         static bool coreWriteHandler(NWAClient client)
         {
             client.readyToWrite = true;

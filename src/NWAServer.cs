@@ -62,7 +62,9 @@ namespace Nyo.Fr.EmuNWA
         MY_NAME_IS,
         CORE_MEMORIES,
         CORE_READ,
-        bCORE_WRITE
+        bCORE_WRITE,
+        LOAD_STATE,
+        SAVE_STATE
     }
     enum ErrorKind
     {
@@ -109,6 +111,9 @@ namespace Nyo.Fr.EmuNWA
         public List<MemoryAccess> memoryAccess;
         public bool shallowBinaryBlock = false;
         public bool readyToWrite = false;
+        public bool savestateToDo = false;
+        public bool savestateSave = false;
+        public String savestateFile = null;
         static int clientId = 0;
 
         public NWAClient(NWAServer Pserver)
@@ -198,6 +203,7 @@ namespace Nyo.Fr.EmuNWA
         public void Close()
         {
             socket.Close();
+            socket = null;
         }
     }
 
@@ -236,7 +242,27 @@ namespace Nyo.Fr.EmuNWA
             clients = new List<NWAClient>();
             //IPHostEntry ipHostInfo = Dns.GetHostEntry("localhost");
             //localEP = new IPEndPoint(ipHostInfo.AddressList[0], 65400);
-            localEP = new IPEndPoint(IPAddress.IPv6Any, 65400);
+            ushort startRange = 0xBEEF;
+            string nwaRangeEnv = System.Environment.GetEnvironmentVariable("NWA_PORT_RANGE");
+            if (nwaRangeEnv != null)
+            {
+                if (nwaRangeEnv.StartsWith("0x"))
+                {
+                    try
+                    {
+                        startRange = Convert.ToUInt16(nwaRangeEnv.Substring(2));
+                    } catch (FormatException)
+                    {
+
+                    }
+                }
+                else
+                {
+                    if (ushort.TryParse(nwaRangeEnv, out ushort envPort))
+                        startRange = envPort;
+                }
+            }
+            localEP = new IPEndPoint(IPAddress.IPv6Any, startRange);
 
             Console.WriteLine($"Local address and port : {localEP.ToString()}");
 
@@ -284,13 +310,18 @@ namespace Nyo.Fr.EmuNWA
         public void doStuffOnFrame()
         {
             handleMemoryAccess();
+            foreach (NWAClient client in clients)
+            {
+                if (client.savestateToDo)
+                    CommandHandler.doActualStateOperation(client);
+            }
         }
 
         private void removeClient(NWAClient client)
         {
             clients.Remove(client);
             Console.WriteLine("Removing : {0}", client.name);
-            clientDisconnectedCallBack?.Invoke(client.name);
+            clientDisconnectedCallBack?.Invoke(String.Copy(client.name));
             if (clientsMemoryAccess.Contains(client))
             {
                 clientsMemoryAccess.Remove(client);
@@ -313,7 +344,7 @@ namespace Nyo.Fr.EmuNWA
                 newClient.socket = handler;
                 numberOfClient++;
                 clients.Add(newClient);
-                newClientConnectedCallBack?.Invoke(newClient.name);
+                newClientConnectedCallBack?.Invoke(String.Copy(newClient.name));
                 handler.BeginReceive(newClient.buffer, 0, NWAClient.BufferSize, SocketFlags.None,
                 new AsyncCallback(this.ReadCallback), newClient);
             }
