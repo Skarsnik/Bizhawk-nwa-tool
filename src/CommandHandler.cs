@@ -183,7 +183,7 @@ namespace Nyo.Fr.EmuNWA
             foreach (var domain in domainsList)
             {
                 Dictionary<String, String> domainRep = new Dictionary<String, String>();
-                domainRep["name"] = Common.domainToNWAName(domain.Name, APIs.GameInfo.GetGameInfo().System);
+                domainRep["name"] = Common.domainToNWAName(domain.Name, APIs.GameInfo.GetGameInfo().System, emulator.Attributes().CoreName);
                 if (domain.Writable == true)
                     domainRep["access"] = "rw";
                 else
@@ -209,7 +209,7 @@ namespace Nyo.Fr.EmuNWA
             if (args.Length >= 1)
             {
 
-                String domain = Common.NWANameToDomain(args[0], APIs.GameInfo.GetGameInfo().System);
+                String domain = Common.NWANameToDomain(args[0], APIs.GameInfo.GetGameInfo().System, emulator.Attributes().CoreName);
                 if (!APIs.Memory.GetMemoryDomainList().Contains(domain))
                 {
                     client.sendError(ErrorKind.command_error, "The specified domain does not exists");

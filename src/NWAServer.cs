@@ -10,33 +10,41 @@ namespace Nyo.Fr.EmuNWA
 {
     public static class Common
     {
-        public static string domainToNWAName(string cname, string system)
+        public static string domainToNWAName(string cname, string system, string coreName)
         {
             if (system == "SNES")
             {
+                if (coreName == "BSNESv115+")
+                {
+                    if (cname == "CARTRIDGE_ROM")
+                        return "CARTROM";
+                    if (cname == "CARTRIDGE_RAM")
+                        return "SRAM";
+                }
                 if (cname == "CARTRAM")
                 {
                     return "SRAM";
                 }
-                else
-                {
-                    return cname;
-                }
+                return cname;
             }
             return cname;
         }
-        public static string NWANameToDomain(string cname, string system)
+        public static string NWANameToDomain(string cname, string system, string coreName)
         {
             if (system == "SNES")
             {
+                if (coreName == "BSNESv115+")
+                {
+                    if (cname == "CARTROM")
+                        return "CARTRIDGE_ROM";
+                    if (cname == "SRAM")
+                        return "CARTRIDGE_RAM";
+                }
                 if (cname == "SRAM")
                 {
                     return "CARTRAM";
                 }
-                else
-                {
-                    return cname;
-                }
+                return cname;
             }
             return cname;
         }

@@ -31,6 +31,6 @@
 	</ItemGroup>
 	<Target Name="PostBuild" AfterTargets="PostBuildEvent">
 		<Copy SourceFiles="$(OutputPath)$(MSBuildProjectName).dll" DestinationFolder="$(ProjectDir)../BizHawk/ExternalTools" />
-		<Copy SourceFiles="$(OutputPath)$(MSBuildProjectName).dll" DestinationFolder="F:\Project\BizHawk\output\ExternalTools" />
+		<Copy SourceFiles="$(OutputPath)$(MSBuildProjectName).dll" DestinationFolder="I:\Project\BizHawk\output\ExternalTools" />
 	</Target>
 </Project>
