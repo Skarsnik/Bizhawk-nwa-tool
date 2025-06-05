@@ -16,6 +16,9 @@ namespace Nyo.Fr.EmuNWA
         public IEmulator? Emulator { get; set; }
         public ApiContainer? _maybeAPIContainer { get; set; }
 
+        [OptionalService]
+        public IStatable? _maybeStatableCore { get; set; }
+
         private ApiContainer APIs => _maybeAPIContainer!;
 
         protected override string WindowTitleStatic => "Emulator Network Access";
@@ -34,6 +37,7 @@ namespace Nyo.Fr.EmuNWA
         }
         private void addMessage(string msg)
         {
+            Console.WriteLine("Adding new message to queue");
             if (APIs == null)
                 messages.Add(msg);
             else
@@ -93,8 +97,11 @@ namespace Nyo.Fr.EmuNWA
         }
         public override void Restart()
         {
+            Console.WriteLine("Tool Restarted");
+            Console.WriteLine("Stastable {0}", _maybeStatableCore == null);
             CommandHandler.APIs = APIs;
             CommandHandler.emulator = Emulator;
+            CommandHandler.statable = _maybeStatableCore;
             if (messages.Count != 0)
             {
                 foreach (var message in messages)

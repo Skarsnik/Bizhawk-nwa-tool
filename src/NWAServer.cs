@@ -1,63 +1,14 @@
-﻿using System;
+﻿using BizHawk.Common;
+using BizHawk.Emulation.Common;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace Nyo.Fr.EmuNWA
 {
-    public static class Common
-    {
-        public static string domainToNWAName(string cname, string system, string coreName)
-        {
-            if (system == "SNES")
-            {
-                if (coreName == "BSNESv115+")
-                {
-                    if (cname == "CARTRIDGE_ROM")
-                        return "CARTROM";
-                    if (cname == "CARTRIDGE_RAM")
-                        return "SRAM";
-                }
-                if (cname == "CARTRAM")
-                {
-                    return "SRAM";
-                }
-                return cname;
-            }
-            return cname;
-        }
-        public static string NWANameToDomain(string cname, string system, string coreName)
-        {
-            if (system == "SNES")
-            {
-                if (coreName == "BSNESv115+")
-                {
-                    if (cname == "CARTROM")
-                        return "CARTRIDGE_ROM";
-                    if (cname == "SRAM")
-                        return "CARTRIDGE_RAM";
-                }
-                if (cname == "SRAM")
-                {
-                    return "CARTRAM";
-                }
-                return cname;
-            }
-            return cname;
-        }
-        public static int NWANumber(String intString)
-        {
-            if (intString[0] == '$')
-            {
-                return int.Parse(intString.Substring(1), System.Globalization.NumberStyles.HexNumber);
-            }
-            return int.Parse(intString);
-        }
-    }
-
     enum NWACommand
     {
         NONE,
@@ -72,7 +23,10 @@ namespace Nyo.Fr.EmuNWA
         CORE_READ,
         bCORE_WRITE,
         LOAD_STATE,
-        SAVE_STATE
+        SAVE_STATE,
+        bLOAD_STATE_FROM_NETWORK,
+        SAVE_STATE_TO_NETWORK
+
     }
     enum ErrorKind
     {
@@ -100,7 +54,7 @@ namespace Nyo.Fr.EmuNWA
         public Socket socket = null;
         public State state = State.WaitingForCommand;
 
-        public const int BufferSize = 1024;
+        public const int BufferSize = 4096;
         public const int BufferCommandSize = 4096;
         public byte[] buffer = new byte[BufferSize];
         public byte[] bufferCommand = new byte[BufferCommandSize];
@@ -121,7 +75,9 @@ namespace Nyo.Fr.EmuNWA
         public bool readyToWrite = false;
         public bool savestateToDo = false;
         public bool savestateSave = false;
-        public String savestateFile = null;
+        public int  savestateSlot = 0;
+        public bool networksaveState = false;
+        public bool dataForNetworkStateReady = false;
         static int clientId = 0;
 
         public NWAClient(NWAServer Pserver)
@@ -236,9 +192,6 @@ namespace Nyo.Fr.EmuNWA
         public NWAServer()
         {
             //_config = config;
-            /*CommandHandler._emu = emulator;
-			CommandHandler._gameInfo = game;
-			CommandHandler._emuClientApi = emuClientApi;*/
             clientsMemoryAccess = new List<NWAClient>();
         }
         internal void addMemoryAccessClient(NWAClient client)
@@ -395,7 +348,12 @@ namespace Nyo.Fr.EmuNWA
             int pos = 0;
             while (pos < client.readed)
             {
-                Console.WriteLine("Client in state {0} - {1}", client.state, BitConverter.ToString(client.buffer));
+                /*if (client.readed < 512)
+                    Console.WriteLine("Client in state {0} - {1}", client.state, BitConverter.ToString(client.buffer));
+                else
+                {
+                    Console.WriteLine("Client in state {0}", client.state);
+                }*/
                 if (client.state == NWAClient.State.ExpectingBinaryData)
                 {
                     client.state = NWAClient.State.GettingBinaryData;
@@ -422,7 +380,20 @@ namespace Nyo.Fr.EmuNWA
                         }
                         if (client.binaryHeaderPos == 4)
                         {
-                            long size = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(client.binaryHeader, 0));
+                            UInt32 size = 0;
+                            if (BitConverter.IsLittleEndian == false)
+                            {
+                                size += (UInt32)(client.binaryHeader[0] << 24);
+                                size += (UInt32)(client.binaryHeader[1] << 16);
+                                size += (UInt32)(client.binaryHeader[2] << 8);
+                                size += client.binaryHeader[3];
+                            } else
+                            {
+                                size += (UInt32)(client.binaryHeader[3] << 24);
+                                size += (UInt32)(client.binaryHeader[2] << 16);
+                                size += (UInt32)(client.binaryHeader[1] << 8);
+                                size += client.binaryHeader[0];
+                            }
                             if (size != client.expectedBinaryDataSize && client.expectedBinaryDataSize > 0)
                             {
                                 client.sendError(ErrorKind.protocol_error, "Expecting a binary block of size " + client.expectedBinaryDataSize + " received a size of " + size);
@@ -503,6 +474,8 @@ namespace Nyo.Fr.EmuNWA
             }
             Array.Clear(client.buffer, 0, NWAClient.BufferSize);
         }
+        // FIXME : We need to not change state to waiting command when some command
+        //         are not done until some code is running on the main thread
         private void executeCommand(NWAClient client)
         {
             // Needed since BufferCommand is a fixed lenght buffer
@@ -528,6 +501,10 @@ namespace Nyo.Fr.EmuNWA
                 CommandHandler.commandsMap.ContainsKey(nwaCommand))
             {
                 Console.WriteLine("Executing : {0}", nwaCommand);
+                if (!CommandHandler.noCoreCommands.Contains(nwaCommand) && CommandHandler.emulator.Attributes().CoreName == "NullHawk")
+                {
+                    client.sendError(ErrorKind.command_error, "The command requiere a core loaded to work");
+                }
                 CommandHandler.commandsMap[nwaCommand](client, args);
                 client.currentCommand = nwaCommand;
             }

@@ -2,6 +2,7 @@
 using BizHawk.Emulation.Cores;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace Nyo.Fr.EmuNWA
@@ -10,6 +11,7 @@ namespace Nyo.Fr.EmuNWA
     {
         static public BizHawk.Client.Common.ApiContainer APIs = null;
         static public BizHawk.Emulation.Common.IEmulator emulator = null;
+        static public BizHawk.Emulation.Common.IStatable statable = null;
         static public bool romloadedOnce = false;
         static public Dictionary<NWACommand, Func<NWAClient, String[], bool>> commandsMap = new Dictionary<NWACommand, Func<NWAClient, String[], bool>>
         {
@@ -24,15 +26,22 @@ namespace Nyo.Fr.EmuNWA
             { NWACommand.bCORE_WRITE, CommandHandler.coreWrite },
             { NWACommand.GAME_INFO, CommandHandler.gameInfo },
             { NWACommand.LOAD_STATE, CommandHandler.loadState },
-            { NWACommand.SAVE_STATE, CommandHandler.saveState }
+            { NWACommand.SAVE_STATE, CommandHandler.saveState },
+            { NWACommand.bLOAD_STATE_FROM_NETWORK, CommandHandler.loadStateNetwork },
+            { NWACommand.SAVE_STATE_TO_NETWORK, CommandHandler.saveStateNetwork }
+        };
+        // Command that don't need a core to work
+        static public List<NWACommand> noCoreCommands = new List<NWACommand>()
+        {   NWACommand.EMULATOR_INFO,
+            NWACommand.EMULATION_STATUS,
+            NWACommand.MY_NAME_IS
         };
 
-       
         static public Dictionary<NWACommand, Func<NWAClient, bool>> binaryCommandHandlerMap = new Dictionary<NWACommand, Func<NWAClient, bool>>()
         {
-            { NWACommand.bCORE_WRITE, CommandHandler.coreWriteHandler }
+            { NWACommand.bCORE_WRITE, CommandHandler.coreWriteHandler },
+            { NWACommand.bLOAD_STATE_FROM_NETWORK, CommandHandler.loadStateNetworkProcessData }
         };
-
 
         static bool emulatorInfo(NWAClient client, String[] args)
         {
@@ -60,7 +69,7 @@ namespace Nyo.Fr.EmuNWA
             }
             else
             {
-                if (APIs.GameInfo.GetGameInfo().System == VSystemID.Raw.NULL)
+                if (APIs.Emulation.GetGameInfo().System == VSystemID.Raw.NULL)
                 {
                     reply["state"] = "no_game";
                 }
@@ -70,7 +79,7 @@ namespace Nyo.Fr.EmuNWA
                         reply["state"] = "paused";
                     else
                         reply["state"] = "running";
-                    reply["game"] = APIs.GameInfo.GetGameInfo().Name;
+                    reply["game"] = APIs.Emulation.GetGameInfo().Name;
                 }
             }
             client.sendHashReply(reply);
@@ -84,9 +93,9 @@ namespace Nyo.Fr.EmuNWA
                 return true;
             }
             Dictionary<String, String> reply = new Dictionary<string, string>();
-            reply["name"] = APIs.GameInfo.GetGameInfo().Name;
-            reply["region"] = APIs.GameInfo.GetGameInfo().Region;
-            reply["hash"] = APIs.GameInfo.GetGameInfo().GetHashCode().ToString();
+            reply["name"] = APIs.Emulation.GetGameInfo().Name;
+            reply["region"] = APIs.Emulation.GetGameInfo().Region;
+            reply["hash"] = APIs.Emulation.GetGameInfo().GetHashCode().ToString();
             client.sendHashReply(reply);
             return true;
         }
@@ -154,8 +163,8 @@ namespace Nyo.Fr.EmuNWA
         }
         static bool currentCoreInfo(NWAClient client, String[] args)
         {
-            var gameInfo = APIs.GameInfo.GetGameInfo();
-            if (APIs == null || APIs.GameInfo.GetGameInfo().System == VSystemID.Raw.NULL)
+            var gameInfo = APIs.Emulation.GetGameInfo();
+            if (APIs == null || gameInfo == null || gameInfo.System == null || emulator.Attributes().CoreName == "NullHawk")
             {
                 client.sendError(ErrorKind.command_error, "No core loaded");
                 return true;
@@ -173,7 +182,7 @@ namespace Nyo.Fr.EmuNWA
 
         static bool coreMemories(NWAClient client, String[] args)
         {
-            if (APIs == null || APIs.GameInfo.GetGameInfo().System == VSystemID.Raw.NULL)
+            if (APIs == null || APIs.Emulation.GetGameInfo().System == VSystemID.Raw.NULL)
             {
                 client.sendError(ErrorKind.command_error, "No core loaded");
                 return true;
@@ -183,7 +192,9 @@ namespace Nyo.Fr.EmuNWA
             foreach (var domain in domainsList)
             {
                 Dictionary<String, String> domainRep = new Dictionary<String, String>();
-                domainRep["name"] = Common.domainToNWAName(domain.Name, APIs.GameInfo.GetGameInfo().System, emulator.Attributes().CoreName);
+                domainRep["name"] = Common.domainToNWAName(domain.Name, APIs.Emulation.GetGameInfo().System, emulator.Attributes().CoreName);
+                if (domainRep["name"] == "")
+                    continue;
                 if (domain.Writable == true)
                     domainRep["access"] = "rw";
                 else
@@ -205,14 +216,19 @@ namespace Nyo.Fr.EmuNWA
                 client.sendError(ErrorKind.invalid_argument, "You need to at least specify a domain to read for CORE_READ or CORE_WRITE");
                 return -1;
             }
+            if (APIs == null || APIs.Emulation.GetGameInfo().System == VSystemID.Raw.NULL)
+            {
+                client.sendError(ErrorKind.command_error, "No core loaded");
+                return -1;
+            }
             var domainsList = ((BizHawk.Client.Common.MemoryApi)(APIs.Memory)).DomainList;
             if (args.Length >= 1)
             {
 
-                String domain = Common.NWANameToDomain(args[0], APIs.GameInfo.GetGameInfo().System, emulator.Attributes().CoreName);
+                String domain = Common.NWANameToDomain(args[0], APIs.Emulation.GetGameInfo().System, emulator.Attributes().CoreName);
                 if (!APIs.Memory.GetMemoryDomainList().Contains(domain))
                 {
-                    client.sendError(ErrorKind.command_error, "The specified domain does not exists");
+                    client.sendError(ErrorKind.command_error, "The specified domain <" + domain + "> does not exists");
                     return -1;
                 }
                 // Whole domain
@@ -288,9 +304,14 @@ namespace Nyo.Fr.EmuNWA
                 client.sendError(ErrorKind.command_error, "The core does not suport savestates");
                 return true;
             }
+            client.savestateSlot = int.Parse(args[0]);
+            if (client.savestateSlot > 10 && client.savestateSlot < 0)
+            {
+                client.sendError(ErrorKind.invalid_argument, "Savestate slotname must be between 0 & 10");
+                return true;
+            }
             client.savestateSave = false;
             client.savestateToDo = true;
-            client.savestateFile = args[0];
             return true;
         }
 
@@ -306,21 +327,83 @@ namespace Nyo.Fr.EmuNWA
                 client.sendError(ErrorKind.command_error, "The core does not suport savestates");
                 return true;
             }
+            client.savestateSlot = int.Parse(args[0]);
+            if (client.savestateSlot > 10 && client.savestateSlot < 0)
+            {
+                client.sendError(ErrorKind.invalid_argument, "Savestate slotname must be between 0 & 10");
+                return true;
+            }
             client.savestateSave = true;
             client.savestateToDo = true;
-            client.savestateFile = args[0];
             return true;
 
         }
-
+        private static bool loadStateNetwork(NWAClient client, string[] arg)
+        {
+            if (statable == null)
+            {
+                client.sendError(ErrorKind.command_error, "No savestate possible");
+                return true;
+            }
+            client.dataForNetworkStateReady = false;
+            client.networksaveState = true;
+            client.savestateSave = false;
+            return true;
+        }
+        private static bool loadStateNetworkProcessData(NWAClient client)
+        {
+            client.dataForNetworkStateReady = true;
+            client.savestateToDo = true;
+            return true;
+        }
+        private static bool saveStateNetwork(NWAClient client, string[] arg)
+        {
+            if (statable == null)
+            {
+                client.sendError(ErrorKind.command_error, "No savestate possible");
+                return true;
+            }
+            client.networksaveState = true;
+            client.savestateToDo = true;
+            client.savestateSave = true;
+            return true;
+        }
         static public void doActualStateOperation(NWAClient client)
         {
-            Console.WriteLine("Doing savestate {0}, {1}", client.savestateSave, client.savestateFile);
+            Console.WriteLine("Doing savestate {0}, {1}", client.savestateSave, client.savestateSlot);
             client.savestateToDo = false;
             if (client.savestateSave)
-                APIs.SaveState.Save(client.savestateFile);
+            {
+                if (client.networksaveState)
+                {
+                    using var ms = new MemoryStream();
+                    using var bw = new BinaryWriter(ms);
+                    statable.SaveStateBinary(bw);
+                    bw.Flush();
+                    client.sendData(ms.ToArray().ToList());
+                    bw.Close();
+                    client.networksaveState = false;
+                    return;
+                } else
+                {
+                    APIs.SaveState.SaveSlot(client.savestateSlot);
+                }
+            }
             else
-                APIs.SaveState.Load(client.savestateFile);
+            {
+                if (client.networksaveState)
+                {
+                    using var ms = new MemoryStream(client.binaryBuffer, false);
+                    using var br = new BinaryReader(ms);
+                    Console.WriteLine("Doing actual loadstate from network");
+                    statable.LoadStateBinary(br);
+                    client.networksaveState = false;
+                }
+                else
+                {
+                    APIs.SaveState.LoadSlot(client.savestateSlot);
+                }
+            }
             client.sendOk();
         }
         static bool coreWriteHandler(NWAClient client)
