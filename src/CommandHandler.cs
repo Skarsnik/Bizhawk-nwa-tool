@@ -28,13 +28,38 @@ namespace Nyo.Fr.EmuNWA
             { NWACommand.LOAD_STATE, CommandHandler.loadState },
             { NWACommand.SAVE_STATE, CommandHandler.saveState },
             { NWACommand.bLOAD_STATE_FROM_NETWORK, CommandHandler.loadStateNetwork },
-            { NWACommand.SAVE_STATE_TO_NETWORK, CommandHandler.saveStateNetwork }
+            { NWACommand.SAVE_STATE_TO_NETWORK, CommandHandler.saveStateNetwork },
+            { NWACommand.LIST_BIZHAWK_DOMAINS, CommandHandler.listBizhawkDomains }
         };
+
+        static bool listBizhawkDomains(NWAClient client, string[] arg2)
+        {
+            var domainsList = ((BizHawk.Client.Common.MemoryApi)(APIs.Memory)).DomainList;
+            List<Dictionary<String, String>> reply = new List<Dictionary<String, String>>();
+            
+            foreach (var domain in domainsList)
+            {
+                Dictionary<String, String> domainRep = new Dictionary<String, String>();
+                domainRep["name"] = domain.Name;
+                if (domainRep["name"] == "")
+                    continue;
+                if (domain.Writable == true)
+                    domainRep["access"] = "rw";
+                else
+                    domainRep["access"] = "r";
+                domainRep["size"] = domain.Size.ToString();
+                reply.Add(domainRep);
+            }
+            client.sendHashReply(reply);
+            return true;
+        }
+
         // Command that don't need a core to work
         static public List<NWACommand> noCoreCommands = new List<NWACommand>()
         {   NWACommand.EMULATOR_INFO,
             NWACommand.EMULATION_STATUS,
-            NWACommand.MY_NAME_IS
+            NWACommand.MY_NAME_IS,
+            NWACommand.CORES_LIST,
         };
 
         static public Dictionary<NWACommand, Func<NWAClient, bool>> binaryCommandHandlerMap = new Dictionary<NWACommand, Func<NWAClient, bool>>()
@@ -103,7 +128,7 @@ namespace Nyo.Fr.EmuNWA
         {
             if (args == null || args.Length != 1)
             {
-                client.sendError(ErrorKind.command_error, "MY_NAME_IS accept one argument <name>");
+                client.sendError(ErrorKind.invalid_argument, "MY_NAME_IS accept one argument <name>");
                 return true;
             }
             client.server.newClientNameCallBack?.Invoke(client.name, args[0]);
@@ -139,7 +164,7 @@ namespace Nyo.Fr.EmuNWA
         {
             if (args == null || args.Length > 1)
             {
-                client.sendError(ErrorKind.command_error, "Core info only take one argument <core_name>");
+                client.sendError(ErrorKind.invalid_argument, "Core info only take one argument <core_name>");
                 return true;
             }
             Dictionary<String, String> reply = new Dictionary<string, string>();
@@ -225,17 +250,18 @@ namespace Nyo.Fr.EmuNWA
             if (args.Length >= 1)
             {
 
-                String domain = Common.NWANameToDomain(args[0], APIs.Emulation.GetGameInfo().System, emulator.Attributes().CoreName);
-                if (!APIs.Memory.GetMemoryDomainList().Contains(domain))
+                String domainName = Common.NWANameToDomain(args[0], APIs.Emulation.GetGameInfo().System, emulator.Attributes().CoreName);
+                var domain = domainsList.Where(obj => obj.Name == domainName).FirstOrDefault();
+                if (domain == null)
                 {
-                    client.sendError(ErrorKind.command_error, "The specified domain <" + domain + "> does not exists");
+                    client.sendError(ErrorKind.command_error, "The specified domain <" + domainName + "> does not exists");
                     return -1;
                 }
                 // Whole domain
                 if (args.Length == 1)
                 {
-                    totalSize = APIs.Memory.GetMemoryDomainSize(domain);
-                    client.addMemoryAccess(domain, 0, APIs.Memory.GetMemoryDomainSize(domain), write);
+                    totalSize = domain.Size;
+                    client.addMemoryAccess(domainName, 0, (uint)domain.Size, write);
                 }
                 else
                 {
@@ -254,12 +280,12 @@ namespace Nyo.Fr.EmuNWA
                         if (i % 2 == 0)
                         {
                             size = (uint)Common.NWANumber(args[i]);
-                            if (offset > domainsList[domain].Size)
+                            if (offset > domainsList[domainName].Size)
                             {
                                 client.sendError(ErrorKind.invalid_argument, "Offset is out of bound for the domain");
                                 return -1;
                             }
-                            client.addMemoryAccess(domain, (uint)offset, size, write);
+                            client.addMemoryAccess(domainName, (uint)offset, size, write);
                             totalSize += size;
                             offset = -1;
                         }
@@ -270,7 +296,7 @@ namespace Nyo.Fr.EmuNWA
                     }
                     if (offset != -1)
                     {
-                        client.addMemoryAccess(domain, (uint)offset, APIs.Memory.GetMemoryDomainSize(domain) - (uint)offset, write);
+                        client.addMemoryAccess(domainName, (uint)offset, APIs.Memory.GetMemoryDomainSize(domainName) - (uint)offset, write);
                     }
                 }
                 client.server.addMemoryAccessClient(client);

@@ -1,4 +1,5 @@
-﻿using BizHawk.Common;
+﻿using BizHawk.Client.EmuHawk;
+using BizHawk.Common;
 using BizHawk.Emulation.Common;
 using System;
 using System.Collections.Generic;
@@ -25,15 +26,16 @@ namespace Nyo.Fr.EmuNWA
         LOAD_STATE,
         SAVE_STATE,
         bLOAD_STATE_FROM_NETWORK,
-        SAVE_STATE_TO_NETWORK
-
+        SAVE_STATE_TO_NETWORK,
+        LIST_BIZHAWK_DOMAINS
     }
     enum ErrorKind
     {
         protocol_error,
         command_error,
         invalid_command,
-        invalid_argument
+        invalid_argument,
+        not_allowed
     }
     class MemoryAccess
     {
@@ -336,7 +338,7 @@ namespace Nyo.Fr.EmuNWA
                 closeAndRemove(client);
                 return;
             }
-            if (client.socket.Connected)
+            if (client.socket != null && client.socket.Connected)
             {
                 client.socket.BeginReceive(client.buffer, 0, NWAClient.BufferSize, SocketFlags.None,
                 new AsyncCallback(this.ReadCallback), client);
@@ -381,19 +383,12 @@ namespace Nyo.Fr.EmuNWA
                         if (client.binaryHeaderPos == 4)
                         {
                             UInt32 size = 0;
-                            if (BitConverter.IsLittleEndian == false)
-                            {
-                                size += (UInt32)(client.binaryHeader[0] << 24);
-                                size += (UInt32)(client.binaryHeader[1] << 16);
-                                size += (UInt32)(client.binaryHeader[2] << 8);
-                                size += client.binaryHeader[3];
-                            } else
-                            {
-                                size += (UInt32)(client.binaryHeader[3] << 24);
-                                size += (UInt32)(client.binaryHeader[2] << 16);
-                                size += (UInt32)(client.binaryHeader[1] << 8);
-                                size += client.binaryHeader[0];
-                            }
+                            var header = client.binaryHeader;
+                            size += header[3];
+                            size += (UInt32) (header[2] << 8);
+                            size += (UInt32) (header[1] << 16);
+                            size += (UInt32) (header[0] << 24);                          
+                            //size = BitConverter.ToUInt32(header, 0);
                             if (size != client.expectedBinaryDataSize && client.expectedBinaryDataSize > 0)
                             {
                                 client.sendError(ErrorKind.protocol_error, "Expecting a binary block of size " + client.expectedBinaryDataSize + " received a size of " + size);

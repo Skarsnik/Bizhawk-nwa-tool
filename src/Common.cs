@@ -16,10 +16,6 @@ namespace Nyo.Fr.EmuNWA
         }
         static private Dictionary<String, Dictionary<String, List<TranslationClass>>> domainTranslations = new()
         { { "SNES", new() {
-                    {"BSNESv115+", new() {
-                                     new() { bizhawkDomainName = "CARTRIDGE_ROM", nwaDomainName = "CARTROM"},
-                                     new() { bizhawkDomainName = "CARTRIDGE_RAM", nwaDomainName = "SRAM"}
-                                   } },
                     {"Faust",      new() {
                                      new() { bizhawkDomainName = "OAMLO", nwaDomainName = "OAM"}
                                    } },
@@ -37,16 +33,19 @@ namespace Nyo.Fr.EmuNWA
         {
             if (bizhawkName == "Waterbox PageData")
                 return "";
-
+            Console.WriteLine("Domain Translation");
             if (domainTranslations.ContainsKey(system))
             {
-                var systemDefs = domainTranslations[system][coreName];
-                foreach (var def in systemDefs)
+                if (domainTranslations[system].ContainsKey(coreName))
                 {
-                    if (def.bizhawkDomainName == bizhawkName)
-                        return def.nwaDomainName;
+                    var systemDefs = domainTranslations[system][coreName];
+                    foreach (var def in systemDefs)
+                    {
+                        if (def.bizhawkDomainName == bizhawkName)
+                            return def.nwaDomainName;
+                    }
                 }
-                if (domainTranslations[system]["NOCORE"] != null)
+                if (domainTranslations[system].ContainsKey("NOCORE"))
                 {
                     var nocoreDefs = domainTranslations[system]["NOCORE"];
                     foreach (var def in nocoreDefs)
@@ -62,15 +61,18 @@ namespace Nyo.Fr.EmuNWA
         {
             if (domainTranslations.ContainsKey(system))
             {
-                var systemDefs = domainTranslations[system][coreName];
-                foreach (var def in systemDefs)
+                if (domainTranslations[system].ContainsKey(coreName))
                 {
-                    if (def.nwaDomainName == nwaName)
-                        return def.bizhawkDomainName;
+                    var systemDefs = domainTranslations[system][coreName];
+                    foreach (var def in systemDefs)
+                    {
+                        if (def.nwaDomainName == nwaName)
+                            return def.bizhawkDomainName;
+                    }
                 }
-                if (domainTranslations[system]["NOCORE"] != null)
+                if (domainTranslations[system].ContainsKey("NOCORE"))
                 {
-                    var nocoreDefs = domainTranslations[system][coreName];
+                    var nocoreDefs = domainTranslations[system]["NOCORE"];
                     foreach (var def in nocoreDefs)
                     {
                         if (def.nwaDomainName == nwaName)
