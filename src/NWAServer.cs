@@ -198,7 +198,10 @@ namespace Nyo.Fr.EmuNWA
         }
         internal void addMemoryAccessClient(NWAClient client)
         {
-            clientsMemoryAccess.Add(client);
+            lock (clientsMemoryAccess)
+            {
+                clientsMemoryAccess.Add(client);
+            }
         }
         public void start()
         {
@@ -252,23 +255,26 @@ namespace Nyo.Fr.EmuNWA
 
         public void handleMemoryAccess()
         {
-            foreach (NWAClient client in clientsMemoryAccess)
+            lock (clientsMemoryAccess)
             {
-                // Read is the easiest
-                Console.WriteLine("Client : " + client.name + "Read memory");
-                if (client.writeAccess == false)
+                foreach (NWAClient client in clientsMemoryAccess)
                 {
-                    CommandHandler.actualReadMemory(client);
-                }
-                else
-                {
-                    if (client.readyToWrite)
+                    // Read is the easiest
+                    Console.WriteLine("Client : " + client.name + "Read memory");
+                    if (client.writeAccess == false)
                     {
-                        CommandHandler.actualWriteMemory(client);
+                        CommandHandler.actualReadMemory(client);
+                    }
+                    else
+                    {
+                        if (client.readyToWrite)
+                        {
+                            CommandHandler.actualWriteMemory(client);
+                        }
                     }
                 }
+                clientsMemoryAccess.Clear();
             }
-            clientsMemoryAccess.Clear();
         }
         public void doStuffOnFrame()
         {
